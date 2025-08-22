@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # MySQL数据库
+  mysql:
+    image: mysql:8.0
+    container_name: enterprise_mail_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
+      MYSQL_DATABASE: enterprise_mail
+      MYSQL_USER: mailuser
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mail_password}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "3306:3306"
+    networks:
+      - mail_network
+
+  # 后端API服务
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: enterprise_mail_api
+    restart: unless-stopped
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: mailuser
+      DB_PASSWORD: ${MYSQL_PASSWORD:-mail_password}
+      DB_NAME: enterprise_mail
+      JWT_SECRET: ${JWT_SECRET:-your_jwt_secret_key_here}
+      JWT_EXPIRES_IN: 24h
+      PORT: 3000
+      NODE_ENV: production
+      FRONTEND_URL: http://localhost
+    depends_on:
+      - mysql
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./uploads:/app/uploads
+    networks:
+      - mail_network
+
+  # 前端Web应用
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: enterprise_mail_web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - mail_network
+
+  # Postfix SMTP服务器
+  postfix:
+    image: catatnight/postfix
+    container_name: enterprise_mail_smtp
+    restart: unless-stopped
+    environment:
+      maildomain: ${MAIL_DOMAIN:-example.com}
+      smtp_user: ${SMTP_USER:-admin}:${SMTP_PASSWORD:-password}
+    ports:
+      - "25:25"
+      - "587:587"
+    networks:
+      - mail_network
+
+  # Dovecot IMAP服务器
+  dovecot:
+    image: dovecot/dovecot
+    container_name: enterprise_mail_imap
+    restart: unless-stopped
+    ports:
+      - "993:993"
+      - "143:143"
+    volumes:
+      - ./mail_data:/var/mail
+      - ./dovecot/dovecot.conf:/etc/dovecot/dovecot.conf
+    networks:
+      - mail_network
+
+volumes:
+  mysql_data:
+  mail_data:
+
+networks:
+  mail_network:
+    driver: bridge
